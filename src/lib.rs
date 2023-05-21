@@ -18,7 +18,10 @@ pub fn digest_256(message: &[u8]) -> [u8; 32] {
     chunks.extend(vec![0; (512 - (l + 72) % 512) / 8]);
     chunks.extend((l as u64).to_be_bytes());
 
-    let mut h: [u32; 8] = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
 
     for chunk in chunks.chunks_exact(64) {
         let mut w: [u32; 64] = [0; 64];
@@ -84,12 +87,99 @@ pub fn digest_256(message: &[u8]) -> [u8; 32] {
     }
 
     let mut digest_bytes = vec![];
-    for &i in h.iter() {
-        digest_bytes.extend(i.to_be_bytes())
+    for i in 0..8 {
+        digest_bytes.extend(h[i].to_be_bytes())
     }
 
     // Convert the vector of bytes into a fixed-sized array of [u8; 32]
     let digest: [u8; 32] = digest_bytes.try_into().unwrap();
+    digest
+}
+
+pub fn digest_224(message: &[u8]) -> [u8; 28] {
+    let mut chunks = message.to_vec();
+
+    // Padding
+    let l = chunks.len() * 8;
+    chunks.push(0b10000000);
+    chunks.extend(vec![0; (512 - (l + 72) % 512) / 8]);
+    chunks.extend((l as u64).to_be_bytes());
+
+    let mut h: [u32; 8] = [
+        0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939, 0xffc00b31, 0x68581511, 0x64f98fa7,
+        0xbefa4fa4,
+    ];
+
+    for chunk in chunks.chunks_exact(64) {
+        let mut w: [u32; 64] = [0; 64];
+
+        for i in 0..16 {
+            w[i] = u32::from_be_bytes([
+                chunk[i * 4],
+                chunk[i * 4 + 1],
+                chunk[i * 4 + 2],
+                chunk[i * 4 + 3],
+            ]);
+        }
+
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+
+        let mut a = h[0];
+        let mut b = h[1];
+        let mut c = h[2];
+        let mut d = h[3];
+        let mut e = h[4];
+        let mut f = h[5];
+        let mut g = h[6];
+        let mut hh = h[7];
+
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ (!e & g);
+            let temp1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K[i])
+                .wrapping_add(w[i]);
+
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+        }
+
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+        h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g);
+        h[7] = h[7].wrapping_add(hh);
+    }
+
+    let mut digest_bytes = vec![];
+    for i in 0..7 {
+        digest_bytes.extend(h[i].to_be_bytes())
+    }
+
+    // Convert the vector of bytes into a fixed-sized array of [u8; 32]
+    let digest: [u8; 28] = digest_bytes.try_into().unwrap();
     digest
 }
 
@@ -109,12 +199,21 @@ mod tests {
     }
 
     #[test]
-    fn test_digest_abc() {
+    fn test_digest_256_abc() {
         let expected_hash = [
             0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae,
             0x22, 0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61,
             0xf2, 0x00, 0x15, 0xad,
         ];
         assert_eq!(expected_hash, digest_256(b"abc"))
+    }
+
+    #[test]
+    fn test_digest_224_empty() {
+        let expected_hash = [
+            0xd1, 0x4a, 0x02, 0x8c, 0x2a, 0x3a, 0x2b, 0xc9, 0x47, 0x61, 0x02, 0xbb, 0x28, 0x82,
+            0x34, 0xc4, 0x15, 0xa2, 0xb0, 0x1f, 0x82, 0x8e, 0xa6, 0x2a, 0xc5, 0xb3, 0xe4, 0x2f,
+        ];
+        assert_eq!(expected_hash, digest_224(b""));
     }
 }
