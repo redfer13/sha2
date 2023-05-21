@@ -363,6 +363,103 @@ pub fn digest_512(message: &[u8]) -> [u8; 64] {
     digest
 }
 
+pub fn digest_384(message: &[u8]) -> [u8; 48] {
+    let mut chunks = message.to_vec();
+
+    // Padding
+    let l = chunks.len() * 8;
+    chunks.push(0b10000000);
+    chunks.extend(vec![0; (1024 - (l + 72) % 1024) / 8]);
+    chunks.extend((l as u128).to_be_bytes());
+
+    let mut h: [u64; 8] = [
+        0xcbbb9d5dc1059ed8,
+        0x629a292a367cd507,
+        0x9159015a3070dd17,
+        0x152fecd8f70e5939,
+        0x67332667ffc00b31,
+        0x8eb44a8768581511,
+        0xdb0c2e0d64f98fa7,
+        0x47b5481dbefa4fa4,
+    ];
+
+    for chunk in chunks.chunks_exact(128) {
+        let mut w: [u64; 80] = [0; 80];
+
+        for i in 0..16 {
+            w[i] = u64::from_be_bytes([
+                chunk[i * 8],
+                chunk[i * 8 + 1],
+                chunk[i * 8 + 2],
+                chunk[i * 8 + 3],
+                chunk[i * 8 + 4],
+                chunk[i * 8 + 5],
+                chunk[i * 8 + 6],
+                chunk[i * 8 + 7],
+            ]);
+        }
+
+        for i in 16..80 {
+            let s0 = w[i - 15].rotate_right(1) ^ w[i - 15].rotate_right(8) ^ (w[i - 15] >> 7);
+            let s1 = w[i - 2].rotate_right(19) ^ w[i - 2].rotate_right(61) ^ (w[i - 2] >> 6);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+
+        let mut a = h[0];
+        let mut b = h[1];
+        let mut c = h[2];
+        let mut d = h[3];
+        let mut e = h[4];
+        let mut f = h[5];
+        let mut g = h[6];
+        let mut hh = h[7];
+
+        for i in 0..80 {
+            let s1 = e.rotate_right(14) ^ e.rotate_right(18) ^ e.rotate_right(41);
+            let ch = (e & f) ^ (!e & g);
+            let temp1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K512[i])
+                .wrapping_add(w[i]);
+
+            let s0 = a.rotate_right(28) ^ a.rotate_right(34) ^ a.rotate_right(39);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+        }
+
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+        h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g);
+        h[7] = h[7].wrapping_add(hh);
+    }
+
+    let mut digest_bytes = vec![];
+    for i in 0..6 {
+        digest_bytes.extend(h[i].to_be_bytes())
+    }
+
+    // Convert the vector of bytes into a fixed-sized array of [u8; 32]
+    let digest: [u8; 48] = digest_bytes.try_into().unwrap();
+    digest
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,5 +504,16 @@ mod tests {
             0xa5, 0x38, 0x32, 0x7a, 0xf9, 0x27, 0xda, 0x3e,
         ];
         assert_eq!(expected_hash, digest_512(b""));
+    }
+
+    #[test]
+    fn test_digest_384_empty() {
+        let expected_hash: [u8; 48] = [
+            0x38, 0xb0, 0x60, 0xa7, 0x51, 0xac, 0x96, 0x38, 0x4c, 0xd9, 0x32, 0x7e, 0xb1, 0xb1,
+            0xe3, 0x6a, 0x21, 0xfd, 0xb7, 0x11, 0x14, 0xbe, 0x07, 0x43, 0x4c, 0x0c, 0xc7, 0xbf,
+            0x63, 0xf6, 0xe1, 0xda, 0x27, 0x4e, 0xde, 0xbf, 0xe7, 0x6f, 0x65, 0xfb, 0xd5, 0x1a,
+            0xd2, 0xf1, 0x48, 0x98, 0xb9, 0x5b,
+        ];
+        assert_eq!(expected_hash, digest_384(b""));
     }
 }
